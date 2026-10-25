@@ -2,60 +2,112 @@ name: Test
 
 on:
   push:
+    paths-ignore:
+      - '**.md'
   schedule:
     # Weekly, at 00:30 UTC on Friday (somewhat randomly chosen).
     - cron: '30 00 * * 5'
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
-  ubuntu:
-    strategy:
-      matrix:
-        platform: [x86, x64]
-        os: [ubuntu-22.04, ubuntu-24.04]
-    runs-on: '${{ matrix.os }}'
-    name: 'Test: ${{ matrix.os }} / ${{ matrix.platform }}'
+  lint:
+    name: Linting
+    runs-on: ubuntu-slim
+    permissions:
+      security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up GCC
-        uses: ./
+        uses: actions/checkout@v7
         with:
-          platform: '${{ matrix.platform }}'
+          persist-credentials: false
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@v0.7.1
+
+  test:
+    strategy:
+      matrix:
+        platform:
+          - x86
+          - x64
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+          - ubuntu-26.04
+    runs-on: ${{ matrix.os }}
+    name: |
+      Test: ${{ matrix.os }} / ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up GCC
+        uses: $/
+        with:
+          platform: ${{ matrix.platform }}
           cc: 1
       - name: Build threads.exe
-        uses: ./.github/actions/build-threads
+        uses: $/.github/actions/build-threads
       - name: Run threads.exe
-        uses: ./.github/actions/run-threads
+        uses: $/.github/actions/run-threads
       - name: Check symlinks
-        uses: ./.github/actions/check-cc
+        uses: $/.github/actions/check-cc
 
-  versions:
-    needs: ubuntu
+  test_versions:
+    needs:
+      - test
     strategy:
       # A weak attempt to please Ubuntu servers:
       max-parallel: 3
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+          - ubuntu-26.04
         version: [9, 10, 11, 12, 13, 14, 15, 16]
-    runs-on: '${{ matrix.os }}'
-    name: 'Version: ${{ matrix.os }} / ${{ matrix.version }}'
+        exclude:
+          - {os: ubuntu-26.04, version: 9}
+          - {os: ubuntu-26.04, version: 10}
+    runs-on: ${{ matrix.os }}
+    name: |
+      Version: ${{ matrix.os }} / ${{ matrix.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up GCC
-        uses: ./
+        uses: actions/checkout@v7
         with:
-          version: '${{ matrix.version }}'
-          platform: '${{ matrix.platform }}'
+          persist-credentials: false
+      - name: Set up GCC
+        uses: $/
+        with:
+          version: ${{ matrix.version }}
+          platform: ${{ matrix.platform }}
           cc: 1
       - name: Build threads.exe
-        uses: ./.github/actions/build-threads
+        uses: $/.github/actions/build-threads
         with:
-          version: '${{ matrix.version }}'
+          version: ${{ matrix.version }}
       - name: Run threads.exe
-        uses: ./.github/actions/run-threads
+        uses: $/.github/actions/run-threads
       - name: Check symlinks
-        uses: ./.github/actions/check-cc
+        uses: $/.github/actions/check-cc
         with:
-          version: '${{ matrix.version }}'
+          version: ${{ matrix.version }}
+
+  release:
+    if: github.ref_type == 'tag'
+    name: Release
+    runs-on: ubuntu-latest
+    needs:
+      - test
+      - test_versions
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Release
+        uses: softprops/action-gh-release@v3
